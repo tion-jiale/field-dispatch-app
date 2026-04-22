@@ -1,13 +1,13 @@
 """
 app.py  —  Streamlit Dashboard for Field Service Dispatch System
-Reads assignments.csv written by FastAPI (called from n8n).
+Fetches data from FastAPI on Railway — no local CSV needed.
 Run: streamlit run app.py
 """
 
 import streamlit as st
 import pandas as pd
-import numpy as np
 import folium
+import requests
 import os
 from streamlit_folium import st_folium
 from datetime import datetime
@@ -18,53 +18,66 @@ st.set_page_config(
     layout="wide",
 )
 
-CENTER_LAT      = 3.8077
-CENTER_LON      = 103.3260
-RADIUS_KM       = 20
-ASSIGNMENTS_CSV = "assignments.csv"
-REFRESH_SEC     = 10
+CENTER_LAT  = 3.8077
+CENTER_LON  = 103.3260
+RADIUS_KM   = 20
+REFRESH_SEC = 10
 
+# ── FastAPI URL ────────────────────────────────────────────────────────────
+try:
+    FASTAPI_URL = st.secrets["FASTAPI_URL"]
+except Exception:
+    FASTAPI_URL = "https://web-production-e5717.up.railway.app"
+
+# ── Data loaders ───────────────────────────────────────────────────────────
 @st.cache_data(ttl=REFRESH_SEC)
 def load_assignments():
-    if os.path.exists(ASSIGNMENTS_CSV):
-        df = pd.read_csv(ASSIGNMENTS_CSV)
+    try:
+        r = requests.get(f"{FASTAPI_URL}/assignments", timeout=10)
+        r.raise_for_status()
+        data = r.json()
+        if not data:
+            return pd.DataFrame()
+        df = pd.DataFrame(data)
         df["timestamp"] = pd.to_datetime(df["timestamp"])
         return df.sort_values("timestamp", ascending=False)
-    return pd.DataFrame()
+    except Exception:
+        return pd.DataFrame()
 
 @st.cache_data(ttl=60)
 def load_technicians():
-    if os.path.exists("technician_dataset.csv"):
-        return pd.read_csv("technician_dataset.csv")
-    return pd.DataFrame()
+    try:
+        r = requests.get(f"{FASTAPI_URL}/technicians", timeout=10)
+        r.raise_for_status()
+        data = r.json()
+        return pd.DataFrame(data) if data else pd.DataFrame()
+    except Exception:
+        return pd.DataFrame()
 
 @st.cache_data(ttl=60)
 def load_workload():
-    if os.path.exists("workload_dataset.csv"):
-        return pd.read_csv("workload_dataset.csv")
-    return pd.DataFrame()
-
-@st.cache_data(ttl=60)
-def load_supervision():
-    if os.path.exists("supervision_dataset.csv"):
-        return pd.read_csv("supervision_dataset.csv")
-    return pd.DataFrame()
+    try:
+        r = requests.get(f"{FASTAPI_URL}/workload", timeout=10)
+        r.raise_for_status()
+        data = r.json()
+        return pd.DataFrame(data) if data else pd.DataFrame()
+    except Exception:
+        return pd.DataFrame()
 
 # ── Header ─────────────────────────────────────────────────────────────────
 st.title("🔧 Field Service Dispatch — Live Dashboard")
 st.caption(
     f"Kuantan, Pahang · {RADIUS_KM} km radius from Padang MBK 1 · "
-    f"Jobs submitted via n8n · Auto-refreshes every {REFRESH_SEC}s"
+    f"Jobs via n8n · Refreshes every {REFRESH_SEC}s"
 )
 
 df_assign = load_assignments()
 df_tech   = load_technicians()
 df_wl     = load_workload()
-df_sup    = load_supervision()
 
-# ── KPI row ────────────────────────────────────────────────────────────────
+# ── KPIs ───────────────────────────────────────────────────────────────────
 c1, c2, c3, c4, c5 = st.columns(5)
-c1.metric("Total Jobs",        len(df_assign) if not df_assign.empty else 0)
+c1.metric("Total Jobs",       len(df_assign) if not df_assign.empty else 0)
 c2.metric("Today",
           len(df_assign[df_assign["timestamp"].dt.date == datetime.today().date()])
           if not df_assign.empty else 0)
@@ -130,12 +143,10 @@ with tab1:
                     icon=folium.Icon(color="red", icon="wrench", prefix="fa"),
                     tooltip=f"Job: {a['customer_name']}",
                 ).add_to(m)
-
                 if pd.notna(a.get("tech_lat")) and pd.notna(a.get("tech_lon")):
                     folium.PolyLine(
                         [[a["tech_lat"], a["tech_lon"]], [a["job_lat"], a["job_lon"]]],
                         color="#16a34a", weight=2, dash_array="6",
-                        tooltip=f"{a['assigned_to']} → {a['customer_name']}"
                     ).add_to(m)
 
         st_folium(m, height=520, use_container_width=True)
@@ -149,7 +160,7 @@ with tab1:
                 st.markdown(f"{dot} **{t['technician_id']}**  \n"
                             f"&nbsp;&nbsp;{t['job_type']} · Skill {t['skill']}")
         else:
-            st.info("Run generate_data.py")
+            st.info("No technician data.")
 
         st.divider()
         st.subheader("Recent Dispatches")
@@ -168,7 +179,6 @@ with tab1:
 # ══════════════════════════════════════════════════════════════════════════
 with tab2:
     st.subheader("📋 All Assignments (submitted via n8n)")
-
     if df_assign.empty:
         st.info("No assignments yet. Submit a job through the n8n form.")
     else:
@@ -202,7 +212,6 @@ with tab2:
             }),
             use_container_width=True, height=400,
         )
-
         st.download_button("⬇️ Download CSV",
                            data=filtered.to_csv(index=False),
                            file_name="assignments_export.csv", mime="text/csv")
@@ -212,14 +221,12 @@ with tab2:
 # ══════════════════════════════════════════════════════════════════════════
 with tab3:
     st.subheader("📊 Workload Distribution")
-
     if not df_assign.empty:
         jobs_per_tech = (df_assign.groupby("assigned_to").size()
                          .reset_index(name="jobs_assigned")
                          .sort_values("jobs_assigned", ascending=False))
         avg_dist = (df_assign.groupby("assigned_to")["distance_km"]
                     .mean().reset_index().rename(columns={"distance_km":"avg_dist_km"}))
-
         wc1, wc2 = st.columns(2)
         with wc1:
             st.markdown("#### Jobs Assigned per Technician")
@@ -227,22 +234,16 @@ with tab3:
         with wc2:
             st.markdown("#### Average Travel Distance per Technician (km)")
             st.bar_chart(avg_dist.set_index("assigned_to")["avg_dist_km"])
-
         st.markdown("#### Job Priority Distribution")
         st.bar_chart(df_assign["job_priority"].value_counts().sort_index())
-
         std_jobs = jobs_per_tech["jobs_assigned"].std()
         st.metric("Workload Fairness (Std Dev)", f"{std_jobs:.2f}",
                   delta="Lower = fairer", delta_color="inverse")
-
     elif not df_wl.empty:
         st.markdown("#### Jobs per Technician (Simulated Dataset)")
         st.bar_chart(df_wl.set_index("tech_id")["no_of_jobs"])
-        if not df_sup.empty:
-            st.markdown("#### Customer Wait Time Distribution (min)")
-            st.bar_chart(df_sup["cust_wait_time"].round(0).value_counts().sort_index())
     else:
-        st.info("Submit jobs via n8n or run generate_data.py to see charts.")
+        st.info("Submit jobs via n8n to see workload charts.")
 
 # ══════════════════════════════════════════════════════════════════════════
 # TAB 4 — Model Evaluation
@@ -254,24 +255,26 @@ with tab4:
 
     **Bellman Consistency** *(Eq 3.8)*: `δt = rt + γ·V(st+1) − V(st)` — Lower |δt| = more stable.
     """)
-
-    if os.path.exists("eval_log.csv"):
-        eval_df = pd.read_csv("eval_log.csv")
-        ec1, ec2 = st.columns(2)
-        with ec1:
-            st.markdown("#### Regret — Baseline vs Learned Policy")
-            st.line_chart(eval_df.set_index("episode")[["J_ref","J_learned"]])
-        with ec2:
-            st.markdown("#### Bellman Residual Convergence")
-            st.line_chart(eval_df.set_index("episode")[["bellman_residual"]])
-
-        final = eval_df.iloc[-1]
-        mc1, mc2, mc3 = st.columns(3)
-        mc1.metric("Final Regret",           f"{final['regret']:.2f}")
-        mc2.metric("Final Bellman Residual",  f"{final['bellman_residual']:.4f}")
-        mc3.metric("Learned Policy Reward",   f"{final['J_learned']:.2f}")
-    else:
-        st.info("Run `python train.py` first to generate eval_log.csv.")
+    try:
+        r = requests.get(f"{FASTAPI_URL}/eval_log", timeout=10)
+        if r.status_code == 200 and r.json():
+            eval_df = pd.DataFrame(r.json())
+            ec1, ec2 = st.columns(2)
+            with ec1:
+                st.markdown("#### Regret — Baseline vs Learned Policy")
+                st.line_chart(eval_df.set_index("episode")[["J_ref","J_learned"]])
+            with ec2:
+                st.markdown("#### Bellman Residual Convergence")
+                st.line_chart(eval_df.set_index("episode")[["bellman_residual"]])
+            final = eval_df.iloc[-1]
+            mc1, mc2, mc3 = st.columns(3)
+            mc1.metric("Final Regret",          f"{final['regret']:.2f}")
+            mc2.metric("Final Bellman Residual", f"{final['bellman_residual']:.4f}")
+            mc3.metric("Learned Policy Reward",  f"{final['J_learned']:.2f}")
+        else:
+            st.info("Run `python train.py` first to generate evaluation data.")
+    except Exception:
+        st.info("Run `python train.py` first to generate evaluation data.")
 
     if not df_assign.empty:
         st.divider()
@@ -285,7 +288,7 @@ with tab4:
 
 # ── Footer ─────────────────────────────────────────────────────────────────
 st.divider()
-col_f1, col_f2 = st.columns([4, 1])
+_, col_f2 = st.columns([4, 1])
 with col_f2:
     if st.button("🔄 Refresh Now"):
         st.cache_data.clear()
