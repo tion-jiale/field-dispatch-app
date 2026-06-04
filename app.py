@@ -90,7 +90,7 @@ c5.metric("Techs Available",
 
 st.divider()
 
-tab1, tab2, tab3, tab4 = st.tabs(
+tab1, tab2, tab3= st.tabs(
     ["🗺️ Live Map", "📋 Assignment Log", "📊 Workload Analysis"]
 )
 
