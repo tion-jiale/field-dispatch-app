@@ -27,7 +27,7 @@ REFRESH_SEC = 10
 try:
     FASTAPI_URL = st.secrets["FASTAPI_URL"]
 except Exception:
-    FASTAPI_URL = "https://web-production-e5717.up.railway.app"
+    FASTAPI_URL = "https://field-dispatch.onrender.com"
 
 # ── Data loaders ───────────────────────────────────────────────────────────
 @st.cache_data(ttl=REFRESH_SEC)
