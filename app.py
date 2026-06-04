@@ -91,7 +91,7 @@ c5.metric("Techs Available",
 st.divider()
 
 tab1, tab2, tab3, tab4 = st.tabs(
-    ["🗺️ Live Map", "📋 Assignment Log", "📊 Workload Analysis", "📈 Model Evaluation"]
+    ["🗺️ Live Map", "📋 Assignment Log", "📊 Workload Analysis"]
 )
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -244,47 +244,6 @@ with tab3:
         st.bar_chart(df_wl.set_index("tech_id")["no_of_jobs"])
     else:
         st.info("Submit jobs via n8n to see workload charts.")
-
-# ══════════════════════════════════════════════════════════════════════════
-# TAB 4 — Model Evaluation
-# ══════════════════════════════════════════════════════════════════════════
-with tab4:
-    st.subheader("📈 Model Evaluation")
-    st.markdown("""
-    **Regret Analysis** *(Eq 3.7)*: `R(π) = J(π_ref) − J(π)` — Negative = outperforms baseline.
-
-    **Bellman Consistency** *(Eq 3.8)*: `δt = rt + γ·V(st+1) − V(st)` — Lower |δt| = more stable.
-    """)
-    try:
-        r = requests.get(f"{FASTAPI_URL}/eval_log", timeout=10)
-        if r.status_code == 200 and r.json():
-            eval_df = pd.DataFrame(r.json())
-            ec1, ec2 = st.columns(2)
-            with ec1:
-                st.markdown("#### Regret — Baseline vs Learned Policy")
-                st.line_chart(eval_df.set_index("episode")[["J_ref","J_learned"]])
-            with ec2:
-                st.markdown("#### Bellman Residual Convergence")
-                st.line_chart(eval_df.set_index("episode")[["bellman_residual"]])
-            final = eval_df.iloc[-1]
-            mc1, mc2, mc3 = st.columns(3)
-            mc1.metric("Final Regret",          f"{final['regret']:.2f}")
-            mc2.metric("Final Bellman Residual", f"{final['bellman_residual']:.4f}")
-            mc3.metric("Learned Policy Reward",  f"{final['J_learned']:.2f}")
-        else:
-            st.info("Run `python train.py` first to generate evaluation data.")
-    except Exception:
-        st.info("Run `python train.py` first to generate evaluation data.")
-
-    if not df_assign.empty:
-        st.divider()
-        st.markdown("#### Live System Performance (n8n submissions)")
-        lc1, lc2, lc3 = st.columns(3)
-        lc1.metric("Avg ETA",          f"{df_assign['eta_min'].mean():.1f} min")
-        lc2.metric("Avg Distance",     f"{df_assign['distance_km'].mean():.2f} km")
-        lc3.metric("Total Dispatches", len(df_assign))
-        st.markdown("#### ETA Trend")
-        st.line_chart(df_assign.sort_values("timestamp").set_index("timestamp")["eta_min"])
 
 # ── Footer ─────────────────────────────────────────────────────────────────
 st.divider()
